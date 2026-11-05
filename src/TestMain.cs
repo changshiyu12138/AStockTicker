@@ -32,11 +32,16 @@ namespace AStockTicker
                     Intraday(args[1]);
                     return 0;
                 }
+                if (args.Length >= 2 && args[0] == "--quote")
+                {
+                    Quote(args[1]);
+                    return 0;
+                }
                 if (args.Length >= 1 && args[0] == "--selftest")
                 {
                     return SelfTest() ? 0 : 1;
                 }
-                Console.WriteLine("usage: AStockTickerTest --dump | --states | --search <code/name> | --intraday <code> | --selftest");
+                Console.WriteLine("usage: AStockTickerTest --dump | --states | --search <code/name> | --intraday <code> | --quote <code[,code...]> | --selftest");
                 return 2;
             }
             catch (Exception ex)
@@ -57,6 +62,13 @@ namespace AStockTicker
             SessionInfo s = MarketClock.Get(now);
             Console.WriteLine("session: " + s.Label + " | " + s.Detail + " | canShow=" + s.CanShow +
                               " | tradingDay=" + s.IsTradingDay);
+            SessionInfo hks = MarketClock.GetHK(now);
+            Console.WriteLine("hk session: " + hks.Label + " | " + hks.Detail + " | canShow=" + hks.CanShow +
+                              " | tradingDay=" + hks.IsTradingDay);
+            bool hasHK = config.HasHongKong();
+            SessionInfo combined = MarketClock.GetCombined(now, hasHK);
+            Console.WriteLine("combined (hasHK=" + hasHK + "): " + combined.Label + " | " + combined.Detail +
+                              " | canShow=" + combined.CanShow);
 
             QuoteBatch batch = QuoteService.Fetch(config.Stocks);
             Console.WriteLine("fetch: " + batch.Quotes.Count + " quotes, error=" + (batch.Error ?? "none") +
@@ -93,6 +105,26 @@ namespace AStockTicker
             Console.WriteLine();
         }
 
+        private static void Quote(string codes)
+        {
+            Console.OutputEncoding = Encoding.UTF8;
+            List<StockItem> items = new List<StockItem>();
+            foreach (string c in codes.Split(','))
+            {
+                string t = c.Trim();
+                if (t.Length > 0) items.Add(new StockItem(t, ""));
+            }
+            QuoteBatch batch = QuoteService.Fetch(items);
+            Console.WriteLine("fetch: " + batch.Quotes.Count + " quotes, error=" + (batch.Error ?? "none") +
+                              ", today=" + batch.HasTodayData + ", latest=" + batch.LatestQuoteTime.ToString("HH:mm:ss"));
+            foreach (Quote q in batch.Quotes)
+            {
+                Console.WriteLine(string.Format("{0,-9} {1,-10} {2,12} {3,9}  prev={4,-10} time={5}",
+                    q.Code, q.Name, q.PriceText, q.ChangeText, q.PrevClose.ToString("F2"),
+                    q.HasTime ? q.Time.ToString("MM-dd HH:mm:ss") : "-"));
+            }
+        }
+
         private static void States()
         {
             DateTime day = new DateTime(2026, 10, 27);
@@ -116,20 +148,54 @@ namespace AStockTicker
             Console.WriteLine("weekend  " + weekend.Label + "  " + weekend.Detail + "  canShow=" + weekend.CanShow);
             SessionInfo holiday = MarketClock.Get(new DateTime(2026, 10, 2, 10, 0, 0));
             Console.WriteLine("holiday  " + holiday.Label + "  " + holiday.Detail + "  canShow=" + holiday.CanShow);
+
+            Console.WriteLine("-- HKEX sessions --");
+            foreach (TimeSpan t in times)
+            {
+                SessionInfo s = MarketClock.GetHK(day + t);
+                Console.WriteLine(t.ToString(@"hh\:mm") + "  " + s.Label + "  " + s.Detail +
+                                  "  canShow=" + s.CanShow);
+            }
+            SessionInfo hkWeekend = MarketClock.GetHK(new DateTime(2026, 10, 25, 10, 0, 0));
+            Console.WriteLine("hk weekend  " + hkWeekend.Label + "  " + hkWeekend.Detail + "  canShow=" + hkWeekend.CanShow);
+            SessionInfo mixedLunch = MarketClock.GetCombined(day + new TimeSpan(11, 45, 0), true);
+            SessionInfo mixedBothLunch = MarketClock.GetCombined(day + new TimeSpan(12, 30, 0), true);
+            Console.WriteLine("mixed 11:45  " + mixedLunch.Label + "  canShow=" + mixedLunch.CanShow);
+            Console.WriteLine("mixed 12:30  " + mixedBothLunch.Label + "  canShow=" + mixedBothLunch.CanShow);
         }
 
         private static bool SelfTest()
         {
             bool ok = true;
-            string[] good = new string[] { "600519", "sh600519", "000001", "sz000001", "430047",
-                                           "920002", "600519.SH", "SZ399001", "sh000001" };
-            string[] bad = new string[] { "abc", "12345", "sh12345", "60051x", "" };
-            foreach (string code in good)
+            string[][] good = new string[][]
             {
-                string n = QuoteService.NormalizeCode(code);
-                Console.WriteLine("normalize " + code + " -> " + (n ?? "NULL"));
-                if (n == null) ok = false;
-                if (code == "920002" && n != "bj920002") ok = false;
+                new string[] { "600519", "sh600519" },
+                new string[] { "sh600519", "sh600519" },
+                new string[] { "000001", "sz000001" },
+                new string[] { "sz000001", "sz000001" },
+                new string[] { "430047", "bj430047" },
+                new string[] { "920002", "bj920002" },
+                new string[] { "600519.SH", "sh600519" },
+                new string[] { "SZ399001", "sz399001" },
+                new string[] { "sh000001", "sh000001" },
+                new string[] { "00700", "hk00700" },
+                new string[] { "hk00700", "hk00700" },
+                new string[] { "700", "hk00700" },
+                new string[] { "hk700", "hk00700" },
+                new string[] { "00700.HK", "hk00700" },
+                new string[] { "12345", "hk12345" },
+                new string[] { "5", "hk00005" },
+                new string[] { "hsi", "hkHSI" },
+                new string[] { "hkHSI", "hkHSI" },
+                new string[] { "HKHSTECH", "hkHSTECH" },
+                new string[] { "hscei", "hkHSCEI" }
+            };
+            string[] bad = new string[] { "abc", "sh12345", "60051x", "", "hk123456", "hkabc", "hk", "hksi" };
+            foreach (string[] pair in good)
+            {
+                string n = QuoteService.NormalizeCode(pair[0]);
+                Console.WriteLine("normalize " + pair[0] + " -> " + (n ?? "NULL"));
+                if (n != pair[1]) ok = false;
             }
             foreach (string code in bad)
             {
@@ -137,6 +203,24 @@ namespace AStockTicker
                 Console.WriteLine("reject " + code + " -> " + (n ?? "NULL"));
                 if (n != null) ok = false;
             }
+
+            // HKEX session clock (2026-11-06 is a Friday).
+            DateTime hkDay = new DateTime(2026, 11, 6);
+            if (MarketClock.GetHK(hkDay + new TimeSpan(9, 5, 0)).Kind != SessionKind.OpeningAuction) ok = false;
+            if (!MarketClock.GetHK(hkDay + new TimeSpan(9, 5, 0)).CanShow) ok = false;
+            if (MarketClock.GetHK(hkDay + new TimeSpan(10, 30, 0)).Kind != SessionKind.Trading) ok = false;
+            if (MarketClock.GetHK(hkDay + new TimeSpan(12, 30, 0)).CanShow) ok = false;
+            if (MarketClock.GetHK(hkDay + new TimeSpan(15, 30, 0)).Kind != SessionKind.Trading) ok = false;
+            if (MarketClock.GetHK(hkDay + new TimeSpan(16, 5, 0)).Kind != SessionKind.ClosingAuction) ok = false;
+            if (MarketClock.GetHK(hkDay + new TimeSpan(16, 30, 0)).CanShow) ok = false;
+            if (MarketClock.GetHK(new DateTime(2026, 11, 7, 10, 0, 0)).CanShow) ok = false;
+
+            // Combined A+HK visibility: either market keeps the strip alive.
+            if (!MarketClock.GetCombined(hkDay + new TimeSpan(11, 45, 0), true).CanShow) ok = false;
+            if (MarketClock.GetCombined(hkDay + new TimeSpan(12, 30, 0), true).CanShow) ok = false;
+            if (!MarketClock.GetCombined(hkDay + new TimeSpan(15, 30, 0), true).CanShow) ok = false;
+            if (MarketClock.GetCombined(hkDay + new TimeSpan(16, 30, 0), true).CanShow) ok = false;
+            if (MarketClock.GetCombined(hkDay + new TimeSpan(11, 45, 0), false).CanShow) ok = false;
 
             AppConfig c = new AppConfig();
             c.AddDefaultStocks();

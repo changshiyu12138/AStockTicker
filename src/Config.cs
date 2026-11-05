@@ -51,6 +51,17 @@ namespace AStockTicker
 
         public const int MaxStocks = 12;
 
+        /// <summary>True when the watch list contains any HK symbol (hk00700, hkHSI...).</summary>
+        public bool HasHongKong()
+        {
+            foreach (StockItem s in Stocks)
+            {
+                if (s != null && s.Code != null &&
+                    s.Code.StartsWith("hk", StringComparison.OrdinalIgnoreCase)) return true;
+            }
+            return false;
+        }
+
         public static AppConfig Load()
         {
             AppConfig c = new AppConfig();

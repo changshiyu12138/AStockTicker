@@ -185,7 +185,7 @@ namespace AStockTicker
             SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint |
                      ControlStyles.UserPaint | ControlStyles.Opaque, true);
 
-            _session = MarketClock.Get(MarketClock.Now);
+            _session = MarketClock.GetCombined(MarketClock.Now, _config.HasHongKong());
             _lastDate = _session.Now.Date;
 
             // Debug affordance: "--show" keeps the strip visible with fresh quotes even when closed.
@@ -411,7 +411,7 @@ namespace AStockTicker
         {
             if (_disposed) return;
             DateTime now = MarketClock.Now;
-            SessionInfo current = MarketClock.Get(now);
+            SessionInfo current = MarketClock.GetCombined(now, _config.HasHongKong());
             bool changed = _session == null || _session.Key != current.Key;
             if (changed)
             {

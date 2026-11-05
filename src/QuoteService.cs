@@ -111,6 +111,13 @@ namespace AStockTicker
             if (s.EndsWith(".sh")) s = "sh" + s.Substring(0, s.Length - 3);
             else if (s.EndsWith(".sz")) s = "sz" + s.Substring(0, s.Length - 3);
             else if (s.EndsWith(".bj")) s = "bj" + s.Substring(0, s.Length - 3);
+            else if (s.EndsWith(".hk")) s = "hk" + s.Substring(0, s.Length - 3);
+
+            // HK indices: the endpoint is case-sensitive (hkHSI works, hkhsi does not),
+            // so aliases in any case map to the canonical mixed-case symbols.
+            if (s == "hsi" || s == "hkhsi") return "hkHSI";
+            if (s == "hstech" || s == "hkhstech") return "hkHSTECH";
+            if (s == "hscei" || s == "hkhscei") return "hkHSCEI";
 
             if (s.Length == 8)
             {
@@ -121,13 +128,26 @@ namespace AStockTicker
                 return null;
             }
 
-            if (s.Length == 6 && AllDigits(s))
+            // HK stocks: 1-5 digit codes, zero-padded to five (hk00700).
+            if (s.StartsWith("hk"))
             {
-                char c = s[0];
-                if (s.StartsWith("92", StringComparison.Ordinal)) return "bj" + s;
-                if (c == '6' || c == '9' || c == '5') return "sh" + s;
-                if (c == '0' || c == '1' || c == '2' || c == '3') return "sz" + s;
-                if (c == '4' || c == '8') return "bj" + s;
+                string rest = s.Substring(2);
+                if (rest.Length >= 1 && rest.Length <= 5 && AllDigits(rest))
+                    return "hk" + rest.PadLeft(5, '0');
+                return null;
+            }
+
+            if (AllDigits(s))
+            {
+                if (s.Length <= 5) return "hk" + s.PadLeft(5, '0');
+                if (s.Length == 6)
+                {
+                    char c = s[0];
+                    if (s.StartsWith("92", StringComparison.Ordinal)) return "bj" + s;
+                    if (c == '6' || c == '9' || c == '5') return "sh" + s;
+                    if (c == '0' || c == '1' || c == '2' || c == '3') return "sz" + s;
+                    if (c == '4' || c == '8') return "bj" + s;
+                }
             }
             return null;
         }
@@ -221,6 +241,8 @@ namespace AStockTicker
                 return type == "ZS" || type.StartsWith("GP-A", StringComparison.Ordinal);
             if (market == "bj")
                 return type == "GP" || type == "ZS" || type.StartsWith("GP-A", StringComparison.Ordinal);
+            if (market == "hk")
+                return type == "GP" || type == "ZS" || type == "GP-ETF";
             return false;
         }
 
@@ -464,15 +486,24 @@ namespace AStockTicker
                 if (f.Length > 30)
                 {
                     string stamp = f[30].Trim();
-                    if (stamp.Length >= 14)
+                    DateTime dt;
+                    bool stamped;
+                    if (stamp.Length >= 14 && stamp.IndexOf('/') < 0)
                     {
-                        DateTime dt;
-                        if (DateTime.TryParseExact(stamp.Substring(0, 14), "yyyyMMddHHmmss",
-                                CultureInfo.InvariantCulture, DateTimeStyles.None, out dt))
-                        {
-                            q.Time = dt;
-                            q.HasTime = true;
-                        }
+                        // A-share endpoint: compact yyyyMMddHHmmss
+                        stamped = DateTime.TryParseExact(stamp.Substring(0, 14), "yyyyMMddHHmmss",
+                            CultureInfo.InvariantCulture, DateTimeStyles.None, out dt);
+                    }
+                    else
+                    {
+                        // HK endpoint: "2026/11/5 9:33:30"
+                        stamped = DateTime.TryParse(stamp, CultureInfo.InvariantCulture,
+                            DateTimeStyles.None, out dt);
+                    }
+                    if (stamped)
+                    {
+                        q.Time = dt;
+                        q.HasTime = true;
                     }
                 }
 

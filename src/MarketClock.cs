@@ -138,6 +138,141 @@ namespace AStockTicker
             return !Holidays.Contains(date.ToString("yyyy-MM-dd"));
         }
 
+        /// <summary>
+        /// HKEX weekday calendar. HK-only closures (Easter, Christmas, typhoon days...)
+        /// are not enumerated here; the stale-quote fallback hides them automatically.
+        /// </summary>
+        public static bool IsHKTradingDay(DateTime date)
+        {
+            return date.DayOfWeek != DayOfWeek.Saturday && date.DayOfWeek != DayOfWeek.Sunday;
+        }
+
+        public static DateTime NextOpenA(DateTime now)
+        {
+            if (IsTradingDay(now.Date) && now.TimeOfDay < new TimeSpan(9, 15, 0))
+                return now.Date + new TimeSpan(9, 15, 0);
+            DateTime d = now.Date.AddDays(1);
+            for (int i = 0; i < 60 && !IsTradingDay(d); i++) d = d.AddDays(1);
+            return d + new TimeSpan(9, 15, 0);
+        }
+
+        public static DateTime NextOpenHK(DateTime now)
+        {
+            if (IsHKTradingDay(now.Date) && now.TimeOfDay < new TimeSpan(9, 0, 0))
+                return now.Date + new TimeSpan(9, 0, 0);
+            DateTime d = now.Date.AddDays(1);
+            for (int i = 0; i < 14 && !IsHKTradingDay(d); i++) d = d.AddDays(1);
+            return d + new TimeSpan(9, 0, 0);
+        }
+
+        /// <summary>
+        /// HKEX session clock: 09:00-09:30 pre-open auction, 09:30-12:00 trading,
+        /// 12:00-13:00 lunch, 13:00-16:00 trading, 16:00-16:10 closing auction.
+        /// </summary>
+        public static SessionInfo GetHK(DateTime now)
+        {
+            bool tradingDay = IsHKTradingDay(now.Date);
+            TimeSpan t = now.TimeOfDay;
+            SessionInfo s = new SessionInfo();
+            s.Now = now;
+            s.IsTradingDay = tradingDay;
+
+            if (!tradingDay)
+            {
+                s.Kind = SessionKind.Closed;
+                s.Label = "休市";
+                s.Detail = NextOpenHKDetail(now);
+                s.CanShow = false;
+                return s;
+            }
+
+            if (t < new TimeSpan(9, 0, 0))
+            {
+                s.Kind = SessionKind.Closed;
+                s.Label = "未开盘";
+                s.Detail = "09:00 开市前时段";
+                s.CanShow = false;
+            }
+            else if (t < new TimeSpan(9, 30, 0))
+            {
+                s.Kind = SessionKind.OpeningAuction;
+                s.Label = "开市前时段";
+                s.Detail = "09:00-09:30";
+                s.CanShow = true;
+            }
+            else if (t < new TimeSpan(12, 0, 0))
+            {
+                s.Kind = SessionKind.Trading;
+                s.Label = "交易中";
+                s.Detail = "09:30-12:00";
+                s.CanShow = true;
+            }
+            else if (t < new TimeSpan(13, 0, 0))
+            {
+                s.Kind = SessionKind.Closed;
+                s.Label = "午间休市";
+                s.Detail = "13:00 继续";
+                s.CanShow = false;
+            }
+            else if (t < new TimeSpan(16, 0, 0))
+            {
+                s.Kind = SessionKind.Trading;
+                s.Label = "交易中";
+                s.Detail = "13:00-16:00";
+                s.CanShow = true;
+            }
+            else if (t < new TimeSpan(16, 10, 0))
+            {
+                s.Kind = SessionKind.ClosingAuction;
+                s.Label = "收盘竞价";
+                s.Detail = "16:00-16:10";
+                s.CanShow = true;
+            }
+            else
+            {
+                s.Kind = SessionKind.Closed;
+                s.Label = "已收盘";
+                s.Detail = NextOpenHKDetail(now);
+                s.CanShow = false;
+            }
+            return s;
+        }
+
+        private static string NextOpenHKDetail(DateTime now)
+        {
+            DateTime d = NextOpenHK(now);
+            int diff = (int)(d.Date - now.Date).TotalDays;
+            string prefix;
+            if (diff == 0) prefix = "今日 ";
+            else if (diff == 1) prefix = "明日 ";
+            else if (diff == 2) prefix = "后天 ";
+            else prefix = DayName(d.DayOfWeek) + " ";
+            return prefix + "09:00";
+        }
+
+        /// <summary>
+        /// Combined session for the watched markets: visible while either the A-share
+        /// or the HKEX side is in a showable window; closed only when both are.
+        /// </summary>
+        public static SessionInfo GetCombined(DateTime now, bool includeHK)
+        {
+            SessionInfo a = Get(now);
+            if (!includeHK) return a;
+
+            SessionInfo h = GetHK(now);
+            if (a.CanShow) return a;
+            if (h.CanShow) return h;
+
+            SessionInfo s = new SessionInfo();
+            s.Now = now;
+            s.Kind = SessionKind.Closed;
+            s.IsTradingDay = a.IsTradingDay || h.IsTradingDay;
+            s.Label = "休市";
+            s.CanShow = false;
+            s.Detail = NextOpenHK(now) < NextOpenA(now) ? h.Detail : a.Detail;
+            return s;
+        }
+
         public static SessionInfo Get(DateTime now)
         {
             bool tradingDay = IsTradingDay(now.Date);
