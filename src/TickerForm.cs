@@ -435,7 +435,10 @@ namespace AStockTicker
             UpdateTray();
             if (Visible) EnsureIntraday();
 
-            if (Visible && !_hover && !_menuOpen && _displayQuotes.Count > 2 &&
+            // In privacy mode hovering is the reading gesture, so rotation must
+            // continue; the unhovered state is frost anyway, where rotation is
+            // invisible. Normal mode keeps the documented hover-pause.
+            if (Visible && (_config.PrivacyMode || !_hover) && !_menuOpen && _displayQuotes.Count > 2 &&
                 (now - _lastCarousel).TotalSeconds >= Math.Max(2, _config.CarouselSeconds))
             {
                 NextStock(false);
@@ -1421,10 +1424,11 @@ namespace AStockTicker
 
         private void ShowAbout()
         {
-            string text = "A股行情条 v1.2（任务栏透明版）\r\n\r\n" +
+            string ver = GetType().Assembly.GetName().Version.ToString(3);
+            string text = "A股行情条 v" + ver + "（任务栏透明版）\r\n\r\n" +
                 "· 每行显示名称、价格、涨跌幅，行末附今日分时走势缩略图\r\n" +
                 "· 红涨绿跌，价格颜色即涨跌方向\r\n" +
-                "· 每 " + _config.CarouselSeconds + " 秒轮播下一组，悬停暂停\r\n" +
+                "· 每 " + _config.CarouselSeconds + " 秒轮播下一组，悬停暂停（隐私模式下悬停不停）\r\n" +
                 "· 午休、收盘后、周末与节假日自动隐藏\r\n" +
                 "· 右键菜单可设置、刷新、退出\r\n\r\n" +
                 "行情来源：腾讯财经 qt.gtimg.cn\r\n" +
