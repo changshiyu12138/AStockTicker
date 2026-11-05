@@ -1,0 +1,12 @@
+# build artifacts
+build/
+dist/
+*.zip
+
+# local runtime files (personal watchlist / logs)
+config.ini
+debug.log
+
+# windows shell junk
+Thumbs.db
+desktop.ini
