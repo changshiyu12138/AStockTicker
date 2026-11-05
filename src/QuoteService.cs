@@ -33,7 +33,15 @@ namespace AStockTicker
 
         public string PriceText
         {
-            get { return Suspended ? "--" : Price.ToString("F2", CultureInfo.InvariantCulture); }
+            get
+            {
+                if (Suspended) return "--";
+                // A-share ETF/LOF quote in 0.001 ticks, so they need a third decimal.
+                bool fund = Code.StartsWith("sh5", StringComparison.Ordinal) ||
+                            Code.StartsWith("sz15", StringComparison.Ordinal) ||
+                            Code.StartsWith("sz16", StringComparison.Ordinal);
+                return Price.ToString(fund ? "F3" : "F2", CultureInfo.InvariantCulture);
+            }
         }
 
         public string ChangeText

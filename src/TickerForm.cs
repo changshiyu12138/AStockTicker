@@ -793,8 +793,11 @@ namespace AStockTicker
                 }
                 if (anyTag) tagW = MeasureTagWidth(g, pctSize);
             }
+            // The pct column is bracketed by pctGap on both sides in RenderContent
+            // (before it and before the chart); budgeting only one gap squeezes the
+            // widest pct string by a couple of pixels and triggers the ellipsis.
             return (int)Math.Ceiling(pad * 2f + maxName + gap + maxPrice + pctGap + maxPct +
-                (anyTag ? pctGap + tagW : 0f) + chartW) + 4;
+                (anyTag ? pctGap + tagW : 0f) + pctGap + chartW) + 4;
         }
 
         private static bool AnySessionTag(List<Quote> quotes)
