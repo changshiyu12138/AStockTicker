@@ -185,10 +185,16 @@ namespace AStockTicker
                 new string[] { "00700.HK", "hk00700" },
                 new string[] { "12345", "hk12345" },
                 new string[] { "5", "hk00005" },
+                new string[] { "2828", "hk02828" },
+                new string[] { "02828", "hk02828" },
                 new string[] { "hsi", "hkHSI" },
                 new string[] { "hkHSI", "hkHSI" },
                 new string[] { "HKHSTECH", "hkHSTECH" },
-                new string[] { "hscei", "hkHSCEI" }
+                new string[] { "hscei", "hkHSCEI" },
+                new string[] { "510300", "sh510300" },
+                new string[] { "159915", "sz159915" },
+                new string[] { "588000", "sh588000" },
+                new string[] { "161725", "sz161725" }
             };
             string[] bad = new string[] { "abc", "sh12345", "60051x", "", "hk123456", "hkabc", "hk", "hksi" };
             foreach (string[] pair in good)

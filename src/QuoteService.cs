@@ -181,6 +181,11 @@ namespace AStockTicker
             string q = query.Trim();
             if (q.Length == 0) return results;
 
+            // Bare short numbers mean HK codes on direct entry (700 -> hk00700), so pad
+            // the search the same way; otherwise smartbox ranks the A-share stock that
+            // shares the padded code higher (2828 -> sz002828) and the HK one is lost.
+            if (AllDigits(q) && q.Length <= 5) q = q.PadLeft(5, '0');
+
             string path = "ifzqgtimg/appstock/smartbox/search/get?q=" + Uri.EscapeDataString(q);
             string body;
             try
@@ -221,7 +226,8 @@ namespace AStockTicker
                 string type = fields[4].Trim();
                 if (!IsTradable(market, type)) continue;
 
-                string code = NormalizeCode(market + digits);
+                // jj-market funds have no market prefix; the 6-digit rules decide sh/sz.
+                string code = NormalizeCode(market == "jj" ? digits : market + digits);
                 if (code == null || name.Length == 0) continue;
                 if (FindSuggestion(into, code) != null) continue;
                 into.Add(new StockSuggestion(code, name));
@@ -238,11 +244,15 @@ namespace AStockTicker
         private static bool IsTradable(string market, string type)
         {
             if (market == "sh" || market == "sz")
-                return type == "ZS" || type.StartsWith("GP-A", StringComparison.Ordinal);
+                return type == "ZS" || type == "ETF" || type == "LOF" ||
+                       type.StartsWith("GP-A", StringComparison.Ordinal);
             if (market == "bj")
                 return type == "GP" || type == "ZS" || type.StartsWith("GP-A", StringComparison.Ordinal);
             if (market == "hk")
-                return type == "GP" || type == "ZS" || type == "GP-ETF";
+                return type == "GP" || type == "ZS" || type == "GP-ETF" || type == "GP-FUND";
+            // jj covers both exchange-traded LOFs and OTC funds; only LOF has realtime quotes.
+            if (market == "jj")
+                return type == "LOF";
             return false;
         }
 
