@@ -65,10 +65,14 @@ namespace AStockTicker
             SessionInfo hks = MarketClock.GetHK(now);
             Console.WriteLine("hk session: " + hks.Label + " | " + hks.Detail + " | canShow=" + hks.CanShow +
                               " | tradingDay=" + hks.IsTradingDay);
+            SessionInfo us = MarketClock.GetUS(now);
+            Console.WriteLine("us session: " + us.Label + " | " + us.Detail + " | canShow=" + us.CanShow +
+                              " | et=" + MarketClock.NowEastern.ToString("yyyy-MM-dd HH:mm:ss"));
             bool hasHK = config.HasHongKong();
-            SessionInfo combined = MarketClock.GetCombined(now, hasHK);
-            Console.WriteLine("combined (hasHK=" + hasHK + "): " + combined.Label + " | " + combined.Detail +
-                              " | canShow=" + combined.CanShow);
+            bool hasUS = config.HasUS();
+            SessionInfo combined = MarketClock.GetCombined(now, hasHK, hasUS);
+            Console.WriteLine("combined (hasHK=" + hasHK + " hasUS=" + hasUS + "): " + combined.Label + " | " +
+                              combined.Detail + " | canShow=" + combined.CanShow);
 
             QuoteBatch batch = QuoteService.Fetch(config.Stocks);
             Console.WriteLine("fetch: " + batch.Quotes.Count + " quotes, error=" + (batch.Error ?? "none") +
@@ -158,10 +162,34 @@ namespace AStockTicker
             }
             SessionInfo hkWeekend = MarketClock.GetHK(new DateTime(2026, 10, 25, 10, 0, 0));
             Console.WriteLine("hk weekend  " + hkWeekend.Label + "  " + hkWeekend.Detail + "  canShow=" + hkWeekend.CanShow);
-            SessionInfo mixedLunch = MarketClock.GetCombined(day + new TimeSpan(11, 45, 0), true);
-            SessionInfo mixedBothLunch = MarketClock.GetCombined(day + new TimeSpan(12, 30, 0), true);
+
+            Console.WriteLine("-- US sessions (Beijing clock, EST = ET+13h) --");
+            DateTime usDay = new DateTime(2026, 11, 6);
+            foreach (TimeSpan t in new TimeSpan[]
+            {
+                new TimeSpan(16, 0, 0),
+                new TimeSpan(17, 30, 0),
+                new TimeSpan(23, 0, 0),
+                new TimeSpan(4, 30, 0)
+            })
+            {
+                SessionInfo s = MarketClock.GetUS(usDay + t);
+                Console.WriteLine(t.ToString(@"hh\:mm") + "  " + s.Label + "  " + s.Detail +
+                                  "  canShow=" + s.CanShow);
+            }
+            SessionInfo usSatMorning = MarketClock.GetUS(new DateTime(2026, 11, 7, 6, 0, 0));
+            Console.WriteLine("sat 06:00  " + usSatMorning.Label + "  " + usSatMorning.Detail +
+                              "  canShow=" + usSatMorning.CanShow);
+            SessionInfo usSatLate = MarketClock.GetUS(new DateTime(2026, 11, 7, 10, 0, 0));
+            Console.WriteLine("sat 10:00  " + usSatLate.Label + "  " + usSatLate.Detail +
+                              "  canShow=" + usSatLate.CanShow);
+
+            SessionInfo mixedLunch = MarketClock.GetCombined(day + new TimeSpan(11, 45, 0), true, false);
+            SessionInfo mixedBothLunch = MarketClock.GetCombined(day + new TimeSpan(12, 30, 0), true, false);
             Console.WriteLine("mixed 11:45  " + mixedLunch.Label + "  canShow=" + mixedLunch.CanShow);
             Console.WriteLine("mixed 12:30  " + mixedBothLunch.Label + "  canShow=" + mixedBothLunch.CanShow);
+            SessionInfo mixedUSNight = MarketClock.GetCombined(day + new TimeSpan(23, 30, 0), false, true);
+            Console.WriteLine("mixed 23:30 (US only)  " + mixedUSNight.Label + "  canShow=" + mixedUSNight.CanShow);
         }
 
         private static bool SelfTest()
@@ -194,9 +222,15 @@ namespace AStockTicker
                 new string[] { "510300", "sh510300" },
                 new string[] { "159915", "sz159915" },
                 new string[] { "588000", "sh588000" },
-                new string[] { "161725", "sz161725" }
+                new string[] { "161725", "sz161725" },
+                new string[] { "usAAPL", "usAAPL" },
+                new string[] { "usAAPL.OQ", "usAAPL" },
+                new string[] { "aapl.us", "usAAPL" },
+                new string[] { "usTSLA", "usTSLA" },
+                new string[] { "usDJI", "usDJI" }
             };
-            string[] bad = new string[] { "abc", "sh12345", "60051x", "", "hk123456", "hkabc", "hk", "hksi" };
+            string[] bad = new string[] { "abc", "sh12345", "60051x", "", "hk123456", "hkabc", "hk", "hksi",
+                "user", "usd", "us00700" };
             foreach (string[] pair in good)
             {
                 string n = QuoteService.NormalizeCode(pair[0]);
@@ -221,12 +255,26 @@ namespace AStockTicker
             if (MarketClock.GetHK(hkDay + new TimeSpan(16, 30, 0)).CanShow) ok = false;
             if (MarketClock.GetHK(new DateTime(2026, 11, 7, 10, 0, 0)).CanShow) ok = false;
 
-            // Combined A+HK visibility: either market keeps the strip alive.
-            if (!MarketClock.GetCombined(hkDay + new TimeSpan(11, 45, 0), true).CanShow) ok = false;
-            if (MarketClock.GetCombined(hkDay + new TimeSpan(12, 30, 0), true).CanShow) ok = false;
-            if (!MarketClock.GetCombined(hkDay + new TimeSpan(15, 30, 0), true).CanShow) ok = false;
-            if (MarketClock.GetCombined(hkDay + new TimeSpan(16, 30, 0), true).CanShow) ok = false;
-            if (MarketClock.GetCombined(hkDay + new TimeSpan(11, 45, 0), false).CanShow) ok = false;
+            // Combined multi-market visibility: any included market keeps the strip alive.
+            if (!MarketClock.GetCombined(hkDay + new TimeSpan(11, 45, 0), true, false).CanShow) ok = false;
+            if (MarketClock.GetCombined(hkDay + new TimeSpan(12, 30, 0), true, false).CanShow) ok = false;
+            if (!MarketClock.GetCombined(hkDay + new TimeSpan(15, 30, 0), true, false).CanShow) ok = false;
+            if (MarketClock.GetCombined(hkDay + new TimeSpan(16, 30, 0), true, false).CanShow) ok = false;
+            if (MarketClock.GetCombined(hkDay + new TimeSpan(11, 45, 0), false, false).CanShow) ok = false;
+
+            // US sessions (2026-11-06 Friday, EST since Nov 1: Beijing = ET + 13h).
+            DateTime usDay = new DateTime(2026, 11, 6);
+            if (MarketClock.GetUS(usDay + new TimeSpan(16, 30, 0)).Kind != SessionKind.Closed) ok = false;
+            if (MarketClock.GetUS(usDay + new TimeSpan(17, 30, 0)).Kind != SessionKind.PreMarket) ok = false;
+            if (!MarketClock.GetUS(usDay + new TimeSpan(17, 30, 0)).CanShow) ok = false;
+            if (MarketClock.GetUS(usDay + new TimeSpan(23, 0, 0)).Kind != SessionKind.Trading) ok = false;
+            if (MarketClock.GetUS(new DateTime(2026, 11, 7, 6, 0, 0)).Kind != SessionKind.AfterHours) ok = false;
+            if (MarketClock.GetUS(new DateTime(2026, 11, 7, 10, 0, 0)).CanShow) ok = false;
+            if (MarketClock.GetUS(new DateTime(2026, 11, 8, 6, 0, 0)).Kind != SessionKind.Closed) ok = false;
+            if (MarketClock.USSessionTag(new DateTime(2026, 11, 4, 8, 0, 0)) != "盘前") ok = false;
+            if (MarketClock.USSessionTag(new DateTime(2026, 11, 4, 17, 0, 0)) != "盘后") ok = false;
+            if (MarketClock.USSessionTag(new DateTime(2026, 11, 4, 12, 30, 0)) != "") ok = false;
+            if (!MarketClock.GetCombined(usDay + new TimeSpan(23, 30, 0), false, true).CanShow) ok = false;
 
             AppConfig c = new AppConfig();
             c.AddDefaultStocks();

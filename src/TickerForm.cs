@@ -185,7 +185,7 @@ namespace AStockTicker
             SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint |
                      ControlStyles.UserPaint | ControlStyles.Opaque, true);
 
-            _session = MarketClock.GetCombined(MarketClock.Now, _config.HasHongKong());
+            _session = MarketClock.GetCombined(MarketClock.Now, _config.HasHongKong(), _config.HasUS());
             _lastDate = _session.Now.Date;
 
             // Debug affordance: "--show" keeps the strip visible with fresh quotes even when closed.
@@ -411,7 +411,7 @@ namespace AStockTicker
         {
             if (_disposed) return;
             DateTime now = MarketClock.Now;
-            SessionInfo current = MarketClock.GetCombined(now, _config.HasHongKong());
+            SessionInfo current = MarketClock.GetCombined(now, _config.HasHongKong(), _config.HasUS());
             bool changed = _session == null || _session.Key != current.Key;
             if (changed)
             {
@@ -755,7 +755,8 @@ namespace AStockTicker
             gap = Math.Max(4f, height * 0.18f);
         }
 
-        /// <summary>Width needed for name, price, percent and the mini trend chart, sized for the widest entry.</summary>
+        /// <summary>Width needed for name, price, percent and the mini trend chart, sized for the widest entry.
+        /// US watchlists reserve a fixed slot for the pre/after-hours tag so rows do not reflow.</summary>
         private int MeasureStripWidth(int height)
         {
             float nameSize, priceSize, pad, rowHeight, gap;
@@ -763,10 +764,12 @@ namespace AStockTicker
             float pctSize = priceSize * 0.85f;
             float pctGap = Math.Max(3f, height * 0.08f);
             float chartW = Math.Max(48f, Math.Min(96f, height * 1.1f));
+            bool anyTag = AnySessionTag(_displayQuotes);
 
             float maxName = 0f;
             float maxPrice = 0f;
             float maxPct = 0f;
+            float tagW = 0f;
             using (Graphics g = Graphics.FromHwnd(IntPtr.Zero))
             using (Font nameFont = new Font("Microsoft YaHei UI", nameSize, FontStyle.Regular, GraphicsUnit.Pixel))
             using (Font priceFont = new Font("Microsoft YaHei UI", priceSize, FontStyle.Bold, GraphicsUnit.Pixel))
@@ -785,8 +788,71 @@ namespace AStockTicker
                     maxPrice = Math.Max(maxPrice, g.MeasureString(q.PriceText, priceFont, new PointF(0f, 0f), sf).Width);
                     maxPct = Math.Max(maxPct, g.MeasureString(q.ChangeText, pctFont, new PointF(0f, 0f), sf).Width);
                 }
+                if (anyTag) tagW = MeasureTagWidth(g, pctSize);
             }
-            return (int)Math.Ceiling(pad * 2f + maxName + gap + maxPrice + pctGap + maxPct + pctGap + chartW) + 4;
+            return (int)Math.Ceiling(pad * 2f + maxName + gap + maxPrice + pctGap + maxPct +
+                (anyTag ? pctGap + tagW : 0f) + chartW) + 4;
+        }
+
+        private static bool AnySessionTag(List<Quote> quotes)
+        {
+            foreach (Quote q in quotes)
+                if (q != null && q.Code != null &&
+                    q.Code.StartsWith("us", StringComparison.Ordinal)) return true;
+            return false;
+        }
+
+        private static float TagFontSize(float pctSize)
+        {
+            return Math.Max(7f, pctSize * 0.62f);
+        }
+
+        private static float MeasureTagWidth(Graphics g, float pctSize)
+        {
+            using (Font tagFont = new Font("Microsoft YaHei UI", TagFontSize(pctSize), FontStyle.Regular, GraphicsUnit.Pixel))
+            using (StringFormat sf = StringFormat.GenericTypographic)
+            {
+                return g.MeasureString("盘后", tagFont, new PointF(0f, 0f), sf).Width + 8f;
+            }
+        }
+
+        /// <summary>Soft pill tag ("盘前"/"盘后") next to the chart for US quotes stamped outside regular hours.</summary>
+        private void DrawSessionTag(Graphics g, Quote q, float x, float w, float rowTop, float rowHeight,
+            bool light, float pctSize)
+        {
+            if (q == null || string.IsNullOrEmpty(q.SessionTag) || w < 12f) return;
+            float fontSize = TagFontSize(pctSize);
+            float tagH = fontSize + 6f;
+            float tagY = rowTop + (rowHeight - tagH) / 2f;
+            RectangleF rect = new RectangleF(x, tagY, w, tagH);
+            Color fill = light ? Color.FromArgb(22, 28, 28, 30) : Color.FromArgb(32, 245, 245, 245);
+            Color text = light ? Color.FromArgb(120, 120, 126) : Color.FromArgb(208, 208, 214);
+            using (Font tagFont = new Font("Microsoft YaHei UI", fontSize, FontStyle.Regular, GraphicsUnit.Pixel))
+            using (GraphicsPath path = RoundedRectPath(rect, tagH / 2f))
+            using (SolidBrush fillBrush = new SolidBrush(fill))
+            using (SolidBrush textBrush = new SolidBrush(text))
+            using (StringFormat sf = StringFormat.GenericTypographic)
+            {
+                sf.FormatFlags |= StringFormatFlags.NoWrap;
+                sf.Alignment = StringAlignment.Center;
+                sf.LineAlignment = StringAlignment.Center;
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                g.FillPath(fillBrush, path);
+                g.DrawString(q.SessionTag, tagFont, textBrush, rect, sf);
+            }
+        }
+
+        private static GraphicsPath RoundedRectPath(RectangleF r, float radius)
+        {
+            GraphicsPath p = new GraphicsPath();
+            float d = Math.Min(radius * 2f, Math.Min(r.Width, r.Height));
+            if (d <= 0f) { p.AddRectangle(r); return p; }
+            p.AddArc(r.X, r.Y, d, d, 180, 90);
+            p.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+            p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+            p.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+            p.CloseFigure();
+            return p;
         }
 
         private void RenderLayered()
@@ -986,6 +1052,9 @@ namespace AStockTicker
                 float chartX = w - pad - chartW;
                 float priceX = pad + (float)Math.Ceiling(nameColumn) + gap;
                 float pctX = priceX + (float)Math.Ceiling(priceColumn) + pctGap;
+                bool anyTag = AnySessionTag(_displayQuotes);
+                float tagW = anyTag ? MeasureTagWidth(g, priceSize * 0.85f) : 0f;
+                float tagX = chartX - pctGap - tagW;
 
                 for (int i = 0; i < rows; i++)
                 {
@@ -1008,9 +1077,11 @@ namespace AStockTicker
                         new RectangleF(priceX, rowTop, priceWidth, rowHeight), sf);
                     if (q != null)
                     {
-                        float pctWidth = Math.Max(1f, chartX - pctGap - pctX);
+                        float pctRight = anyTag ? tagX - pctGap : chartX - pctGap;
+                        float pctWidth = Math.Max(1f, pctRight - pctX);
                         g.DrawString(q.ChangeText, pctFont, priceBrush,
                             new RectangleF(pctX, rowTop, pctWidth, rowHeight), sf);
+                        DrawSessionTag(g, q, tagX, tagW, rowTop, rowHeight, light, priceSize * 0.85f);
 
                         List<double> series = IntradaySeries(q.Code);
                         if (series != null && chartW >= 12f && chartH >= 8f)

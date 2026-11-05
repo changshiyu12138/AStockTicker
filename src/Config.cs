@@ -62,6 +62,16 @@ namespace AStockTicker
             return false;
         }
 
+        public bool HasUS()
+        {
+            foreach (StockItem s in Stocks)
+            {
+                if (s != null && s.Code != null &&
+                    s.Code.StartsWith("us", StringComparison.OrdinalIgnoreCase)) return true;
+            }
+            return false;
+        }
+
         public static AppConfig Load()
         {
             AppConfig c = new AppConfig();

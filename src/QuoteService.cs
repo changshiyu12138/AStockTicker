@@ -23,6 +23,9 @@ namespace AStockTicker
         public DateTime Time;
         public bool HasTime;
 
+        /// <summary>"盘前"/"盘后" when this US quote was stamped outside regular hours.</summary>
+        public string SessionTag = "";
+
         public bool Suspended
         {
             get { return Price <= 0.0001; }
@@ -137,6 +140,47 @@ namespace AStockTicker
                 return null;
             }
 
+            // US symbols, matched on the case-preserved form because symbol case is
+            // meaningful ("user" stays a search term, "usAAPL" is a ticker):
+            // "usAAPL", "usAAPL.OQ" and explicit "aapl.us" all map to canonical
+            // "usAAPL" (the quote endpoint takes the bare symbol). Bare letters
+            // ("aapl") stay unnormalized so the name/pinyin search path still
+            // triggers; pure digits ("us00700") are not US symbols.
+            string orig = raw.Trim().Replace(" ", "").Replace("\u3000", "");
+            string usRest = null;
+            bool usExplicit = orig.EndsWith(".us", StringComparison.OrdinalIgnoreCase);
+            if (usExplicit && orig.Length > 3)
+            {
+                usRest = orig.Substring(0, orig.Length - 3);
+            }
+            else if (!usExplicit && orig.StartsWith("us", StringComparison.OrdinalIgnoreCase) &&
+                     orig.Length >= 4)
+            {
+                usRest = orig.Substring(2);
+            }
+            if (usRest != null)
+            {
+                bool hasLetter = false, hasUpper = false, hasDigit = false, hasMark = false, ok = true;
+                for (int i = 0; i < usRest.Length; i++)
+                {
+                    char c = usRest[i];
+                    if (c >= 'A' && c <= 'Z') { hasLetter = true; hasUpper = true; }
+                    else if (c >= 'a' && c <= 'z') { hasLetter = true; }
+                    else if (c >= '0' && c <= '9') hasDigit = true;
+                    else if (c == '.' || c == '_') hasMark = true;
+                    else { ok = false; break; }
+                }
+                if (ok && hasLetter && (usExplicit || hasUpper || hasDigit || hasMark))
+                {
+                    int cut = usRest.IndexOfAny(CodeSeparators);
+                    if (cut == 0) return null;
+                    if (cut > 0) usRest = usRest.Substring(0, cut);
+                    if (usRest.Length >= 1 && usRest.Length <= 6)
+                        return "us" + usRest.ToUpperInvariant();
+                }
+                return null;
+            }
+
             if (AllDigits(s))
             {
                 if (s.Length <= 5) return "hk" + s.PadLeft(5, '0');
@@ -159,6 +203,8 @@ namespace AStockTicker
                 if (s[i] < '0' || s[i] > '9') return false;
             return true;
         }
+
+        private static readonly char[] CodeSeparators = { '.', '_' };
 
         public static Quote FetchOne(string code)
         {
@@ -253,6 +299,8 @@ namespace AStockTicker
             // jj covers both exchange-traded LOFs and OTC funds; only LOF has realtime quotes.
             if (market == "jj")
                 return type == "LOF";
+            if (market == "us")
+                return type == "GP" || type == "GP-ETF" || type == "ZS";
             return false;
         }
 
@@ -459,6 +507,7 @@ namespace AStockTicker
             if (string.IsNullOrEmpty(text)) return;
             string[] records = text.Split(new char[] { '\n', ';' }, StringSplitOptions.RemoveEmptyEntries);
             DateTime today = MarketClock.Now.Date;
+            DateTime etToday = MarketClock.NowEastern.Date;
 
             foreach (string rawRecord in records)
             {
@@ -496,9 +545,21 @@ namespace AStockTicker
                 if (f.Length > 30)
                 {
                     string stamp = f[30].Trim();
-                    DateTime dt;
+                    DateTime dt = DateTime.MinValue;
                     bool stamped;
-                    if (stamp.Length >= 14 && stamp.IndexOf('/') < 0)
+                    if (stamp.IndexOf('/') > 0)
+                    {
+                        // HK endpoint: "2026/11/5 9:33:30"
+                        stamped = DateTime.TryParse(stamp, CultureInfo.InvariantCulture,
+                            DateTimeStyles.None, out dt);
+                    }
+                    else if (stamp.IndexOf('-') > 0)
+                    {
+                        // US endpoint: "2026-11-04 16:00:01" (US Eastern local time)
+                        stamped = DateTime.TryParse(stamp, CultureInfo.InvariantCulture,
+                            DateTimeStyles.None, out dt);
+                    }
+                    else if (stamp.Length >= 14)
                     {
                         // A-share endpoint: compact yyyyMMddHHmmss
                         stamped = DateTime.TryParseExact(stamp.Substring(0, 14), "yyyyMMddHHmmss",
@@ -506,9 +567,7 @@ namespace AStockTicker
                     }
                     else
                     {
-                        // HK endpoint: "2026/11/5 9:33:30"
-                        stamped = DateTime.TryParse(stamp, CultureInfo.InvariantCulture,
-                            DateTimeStyles.None, out dt);
+                        stamped = false;
                     }
                     if (stamped)
                     {
@@ -526,8 +585,12 @@ namespace AStockTicker
                 if (q.Name.Length == 0 && fallbackNames.ContainsKey(code)) q.Name = fallbackNames[code];
                 if (q.Name.Length == 0) continue;
 
-                if (q.HasTime && q.Time.Date == today) batch.HasTodayData = true;
+                // US stamps are Eastern-time, so "today" for freshness follows that market.
+                bool isUS = code.StartsWith("us", StringComparison.Ordinal);
+                DateTime marketToday = isUS ? etToday : today;
+                if (q.HasTime && q.Time.Date == marketToday) batch.HasTodayData = true;
                 if (q.HasTime && q.Time > batch.LatestQuoteTime) batch.LatestQuoteTime = q.Time;
+                if (isUS && q.HasTime) q.SessionTag = MarketClock.USSessionTag(q.Time);
                 batch.Quotes.Add(q);
             }
         }

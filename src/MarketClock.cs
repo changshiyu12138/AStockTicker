@@ -11,7 +11,9 @@ namespace AStockTicker
         OpeningAuction,
         PreOpen,
         Trading,
-        ClosingAuction
+        ClosingAuction,
+        PreMarket,
+        AfterHours
     }
 
     public class SessionInfo
@@ -42,6 +44,7 @@ namespace AStockTicker
     public static class MarketClock
     {
         private static readonly TimeZoneInfo ChinaTz = FindChinaTimeZone();
+        private static readonly TimeZoneInfo EasternTz = FindEasternTimeZone();
         private static readonly HashSet<string> Holidays = BuildHolidays();
 
         public static DateTime Now
@@ -73,6 +76,26 @@ namespace AStockTicker
                         "CST", TimeSpan.FromHours(8), "China Standard Time", "CST");
                 }
             }
+        }
+
+        private static TimeZoneInfo FindEasternTimeZone()
+        {
+            try { return TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time"); }
+            catch
+            {
+                try { return TimeZoneInfo.FindSystemTimeZoneById("America/New_York"); }
+                catch
+                {
+                    return TimeZoneInfo.CreateCustomTimeZone(
+                        "EST", TimeSpan.FromHours(-5), "US Eastern", "EST");
+                }
+            }
+        }
+
+        /// <summary>Current US Eastern time; DST transitions follow the Windows time-zone rules.</summary>
+        public static DateTime NowEastern
+        {
+            get { return TimeZoneInfo.ConvertTime(Now, ChinaTz, EasternTz); }
         }
 
         private static HashSet<string> BuildHolidays()
@@ -147,6 +170,11 @@ namespace AStockTicker
             return date.DayOfWeek != DayOfWeek.Saturday && date.DayOfWeek != DayOfWeek.Sunday;
         }
 
+        private static bool IsUSWeekday(DateTime date)
+        {
+            return date.DayOfWeek != DayOfWeek.Saturday && date.DayOfWeek != DayOfWeek.Sunday;
+        }
+
         public static DateTime NextOpenA(DateTime now)
         {
             if (IsTradingDay(now.Date) && now.TimeOfDay < new TimeSpan(9, 15, 0))
@@ -163,6 +191,21 @@ namespace AStockTicker
             DateTime d = now.Date.AddDays(1);
             for (int i = 0; i < 14 && !IsHKTradingDay(d); i++) d = d.AddDays(1);
             return d + new TimeSpan(9, 0, 0);
+        }
+
+        /// <summary>Next US pre-market start, expressed in China Standard Time.</summary>
+        public static DateTime NextOpenUS(DateTime now)
+        {
+            DateTime et = TimeZoneInfo.ConvertTime(now, ChinaTz, EasternTz);
+            if (IsUSWeekday(et.Date) && et.TimeOfDay < new TimeSpan(4, 0, 0))
+                return TimeZoneInfo.ConvertTime(et.Date + new TimeSpan(4, 0, 0), EasternTz, ChinaTz);
+            for (int i = 1; i <= 10; i++)
+            {
+                DateTime d = et.Date.AddDays(i);
+                if (IsUSWeekday(d))
+                    return TimeZoneInfo.ConvertTime(d + new TimeSpan(4, 0, 0), EasternTz, ChinaTz);
+            }
+            return now.Date.AddDays(1);
         }
 
         /// <summary>
@@ -251,25 +294,127 @@ namespace AStockTicker
         }
 
         /// <summary>
-        /// Combined session for the watched markets: visible while either the A-share
-        /// or the HKEX side is in a showable window; closed only when both are.
+        /// US session clock in Eastern time: 04:00-09:30 pre-market, 09:30-16:00 regular,
+        /// 16:00-20:00 after-hours; pre/after windows display with a tag. US-only holidays
+        /// are not enumerated here; the stale-quote fallback hides them automatically.
         /// </summary>
-        public static SessionInfo GetCombined(DateTime now, bool includeHK)
+        public static SessionInfo GetUS(DateTime now)
+        {
+            DateTime et = TimeZoneInfo.ConvertTime(now, ChinaTz, EasternTz);
+            bool tradingDay = IsUSWeekday(et.Date);
+            TimeSpan t = et.TimeOfDay;
+            SessionInfo s = new SessionInfo();
+            s.Now = now;
+            s.IsTradingDay = tradingDay;
+
+            if (!tradingDay)
+            {
+                s.Kind = SessionKind.Closed;
+                s.Label = "休市";
+                s.Detail = NextOpenUSDetail(now);
+                s.CanShow = false;
+                return s;
+            }
+
+            if (t < new TimeSpan(4, 0, 0))
+            {
+                s.Kind = SessionKind.Closed;
+                s.Label = "未开盘";
+                s.Detail = BeijingWindow(et.Date + new TimeSpan(4, 0, 0), null) + " 盘前";
+                s.CanShow = false;
+            }
+            else if (t < new TimeSpan(9, 30, 0))
+            {
+                s.Kind = SessionKind.PreMarket;
+                s.Label = "盘前";
+                s.Detail = BeijingWindow(et.Date + new TimeSpan(4, 0, 0),
+                    et.Date + new TimeSpan(9, 30, 0));
+                s.CanShow = true;
+            }
+            else if (t < new TimeSpan(16, 0, 0))
+            {
+                s.Kind = SessionKind.Trading;
+                s.Label = "交易中";
+                s.Detail = BeijingWindow(et.Date + new TimeSpan(9, 30, 0),
+                    et.Date + new TimeSpan(16, 0, 0));
+                s.CanShow = true;
+            }
+            else if (t < new TimeSpan(20, 0, 0))
+            {
+                s.Kind = SessionKind.AfterHours;
+                s.Label = "盘后";
+                s.Detail = BeijingWindow(et.Date + new TimeSpan(16, 0, 0),
+                    et.Date + new TimeSpan(20, 0, 0));
+                s.CanShow = true;
+            }
+            else
+            {
+                s.Kind = SessionKind.Closed;
+                s.Label = "已收盘";
+                s.Detail = NextOpenUSDetail(now);
+                s.CanShow = false;
+            }
+            return s;
+        }
+
+        /// <summary>An ET window rendered in Beijing clock so tooltips stay consistent.</summary>
+        private static string BeijingWindow(DateTime etStart, DateTime? etEnd)
+        {
+            string start = TimeZoneInfo.ConvertTime(etStart, EasternTz, ChinaTz).ToString("HH:mm");
+            if (etEnd == null) return start;
+            return start + "-" + TimeZoneInfo.ConvertTime(etEnd.Value, EasternTz, ChinaTz).ToString("HH:mm");
+        }
+
+        private static string NextOpenUSDetail(DateTime now)
+        {
+            DateTime d = NextOpenUS(now);
+            int diff = (int)(d.Date - now.Date).TotalDays;
+            string prefix;
+            if (diff == 0) prefix = "今日 ";
+            else if (diff == 1) prefix = "明日 ";
+            else if (diff == 2) prefix = "后天 ";
+            else prefix = DayName(d.DayOfWeek) + " ";
+            return prefix + d.ToString("HH:mm") + " 盘前";
+        }
+
+        /// <summary>"盘前"/"盘后" when an Eastern-time quote falls in a pre/after window.</summary>
+        public static string USSessionTag(DateTime eastern)
+        {
+            TimeSpan t = eastern.TimeOfDay;
+            if (t >= new TimeSpan(4, 0, 0) && t < new TimeSpan(9, 30, 0)) return "盘前";
+            if (t >= new TimeSpan(16, 0, 0) && t < new TimeSpan(20, 0, 0)) return "盘后";
+            return "";
+        }
+
+        /// <summary>
+        /// Combined session for the watched markets: visible while any included market
+        /// (A-share, HKEX, or US pre/after) is in a showable window; closed only when
+        /// all of them are.
+        /// </summary>
+        public static SessionInfo GetCombined(DateTime now, bool includeHK, bool includeUS)
         {
             SessionInfo a = Get(now);
-            if (!includeHK) return a;
-
-            SessionInfo h = GetHK(now);
+            SessionInfo h = includeHK ? GetHK(now) : null;
+            SessionInfo u = includeUS ? GetUS(now) : null;
             if (a.CanShow) return a;
-            if (h.CanShow) return h;
+            if (h != null && h.CanShow) return h;
+            if (u != null && u.CanShow) return u;
 
             SessionInfo s = new SessionInfo();
             s.Now = now;
             s.Kind = SessionKind.Closed;
-            s.IsTradingDay = a.IsTradingDay || h.IsTradingDay;
+            s.IsTradingDay = a.IsTradingDay || (h != null && h.IsTradingDay) ||
+                             (u != null && u.IsTradingDay);
             s.Label = "休市";
             s.CanShow = false;
-            s.Detail = NextOpenHK(now) < NextOpenA(now) ? h.Detail : a.Detail;
+
+            DateTime next = NextOpenA(now);
+            string detail = a.Detail;
+            DateTime nextHK = h != null ? NextOpenHK(now) : DateTime.MaxValue;
+            DateTime nextUS = u != null ? NextOpenUS(now) : DateTime.MaxValue;
+            if (nextHK < next) { next = nextHK; detail = h.Detail; }
+            if (nextUS < next) { next = nextUS; detail = u.Detail; }
+            s.Detail = detail;
             return s;
         }
 

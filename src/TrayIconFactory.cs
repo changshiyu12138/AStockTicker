@@ -107,6 +107,7 @@ namespace AStockTicker
         public static Color ForSession(SessionKind kind)
         {
             if (kind == SessionKind.Trading) return Trading;
+            if (kind == SessionKind.PreMarket || kind == SessionKind.AfterHours) return Trading;
             if (kind == SessionKind.OpeningAuction || kind == SessionKind.PreOpen ||
                 kind == SessionKind.ClosingAuction) return Auction;
             return Closed;
