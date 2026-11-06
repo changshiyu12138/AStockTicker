@@ -276,6 +276,20 @@ namespace AStockTicker
             if (MarketClock.USSessionTag(new DateTime(2026, 11, 4, 12, 30, 0)) != "") ok = false;
             if (!MarketClock.GetCombined(usDay + new TimeSpan(23, 30, 0), false, true).CanShow) ok = false;
 
+            // Per-stock showability gates the carousel by market (v1.6, same Friday).
+            if (!MarketClock.ShowableFor("sh600519", usDay + new TimeSpan(10, 0, 0))) ok = false;
+            if (MarketClock.ShowableFor("sh600519", usDay + new TimeSpan(12, 30, 0))) ok = false;
+            if (MarketClock.ShowableFor("sh600519", usDay + new TimeSpan(23, 30, 0))) ok = false;
+            if (!MarketClock.ShowableFor("hk00700", usDay + new TimeSpan(10, 0, 0))) ok = false;
+            if (MarketClock.ShowableFor("hk00700", usDay + new TimeSpan(12, 30, 0))) ok = false;
+            if (!MarketClock.ShowableFor("hk00700", usDay + new TimeSpan(15, 30, 0))) ok = false;
+            if (MarketClock.ShowableFor("usAAPL", usDay + new TimeSpan(16, 30, 0))) ok = false;
+            if (!MarketClock.ShowableFor("usAAPL", usDay + new TimeSpan(17, 30, 0))) ok = false;
+            if (!MarketClock.ShowableFor("usAAPL", usDay + new TimeSpan(23, 0, 0))) ok = false;
+            if (!MarketClock.ShowableFor("usAAPL", new DateTime(2026, 11, 7, 6, 0, 0))) ok = false;
+            if (MarketClock.ShowableFor("usAAPL", new DateTime(2026, 11, 7, 10, 0, 0))) ok = false;
+            if (MarketClock.ShowableFor("", usDay + new TimeSpan(10, 0, 0))) ok = false;
+
             AppConfig c = new AppConfig();
             c.AddDefaultStocks();
             c.FontSize = 11;

@@ -40,7 +40,7 @@ namespace AStockTicker
         public int FontSize = 10;
         public int OpacityPercent = 94;
         public bool AlwaysOnTop = true;
-        public bool HideWhenClosed = true;
+        public bool ShowAllDay = false;
         public bool MonoColor = false;
         public bool PrivacyMode = false;
         public int FrostLevel = 2;
@@ -130,7 +130,7 @@ namespace AStockTicker
             c.FontSize = FontSize;
             c.OpacityPercent = OpacityPercent;
             c.AlwaysOnTop = AlwaysOnTop;
-            c.HideWhenClosed = HideWhenClosed;
+            c.ShowAllDay = ShowAllDay;
             c.MonoColor = MonoColor;
             c.PrivacyMode = PrivacyMode;
             c.FrostLevel = FrostLevel;
@@ -221,8 +221,8 @@ namespace AStockTicker
                     case "alwaysontop":
                         AlwaysOnTop = ParseBool(val, AlwaysOnTop);
                         break;
-                    case "hidewhenclosed":
-                        HideWhenClosed = ParseBool(val, HideWhenClosed);
+                    case "showallday":
+                        ShowAllDay = ParseBool(val, ShowAllDay);
                         break;
                     case "monocolor":
                         MonoColor = ParseBool(val, MonoColor);
@@ -283,7 +283,7 @@ namespace AStockTicker
             sb.AppendLine("FontSize=" + FontSize.ToString(CultureInfo.InvariantCulture));
             sb.AppendLine("Opacity=" + OpacityPercent.ToString(CultureInfo.InvariantCulture));
             sb.AppendLine("AlwaysOnTop=" + (AlwaysOnTop ? "1" : "0"));
-            sb.AppendLine("HideWhenClosed=" + (HideWhenClosed ? "1" : "0"));
+            sb.AppendLine("ShowAllDay=" + (ShowAllDay ? "1" : "0"));
             sb.AppendLine("MonoColor=" + (MonoColor ? "1" : "0"));
             sb.AppendLine("Privacy=" + (PrivacyMode ? "1" : "0"));
             sb.AppendLine("FrostLevel=" + FrostLevel.ToString(CultureInfo.InvariantCulture));

@@ -109,6 +109,18 @@ namespace AStockTicker
         [DllImport("gdi32.dll")]
         private static extern bool DeleteDC(IntPtr hdc);
 
+        [DllImport("shell32.dll")]
+        private static extern int Shell_NotifyIconGetRect(ref NOTIFYICONIDENTIFIER identifier, out RECT iconLocation);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct NOTIFYICONIDENTIFIER
+        {
+            public int cbSize;
+            public IntPtr hWnd;
+            public uint uID;
+            public Guid guidItem;
+        }
+
         private const int WS_EX_LAYERED = 0x00080000;
         private const int WS_EX_TOOLWINDOW = 0x00000080;
         private const uint SWP_NOACTIVATE = 0x0010;
@@ -169,6 +181,13 @@ namespace AStockTicker
         private bool _readyToShow;
         private bool _disposed;
         private bool _exiting;
+
+        private TrayHoverList _hoverList;
+        private DateTime _trayHoverSince = DateTime.MinValue;
+        private IntPtr _trayHwnd;
+        private int _trayId = -1;
+        private Rectangle _notifyRect;
+        private string _hoverKey = "";
 
         public TickerForm(AppConfig config)
         {
@@ -438,7 +457,8 @@ namespace AStockTicker
             // In privacy mode hovering is the reading gesture, so rotation must
             // continue; the unhovered state is frost anyway, where rotation is
             // invisible. Normal mode keeps the documented hover-pause.
-            if (Visible && (_config.PrivacyMode || !_hover) && !_menuOpen && _displayQuotes.Count > 2 &&
+            List<Quote> visible = VisibleQuotes();
+            if (Visible && (_config.PrivacyMode || !_hover) && !_menuOpen && visible.Count > 2 &&
                 (now - _lastCarousel).TotalSeconds >= Math.Max(2, _config.CarouselSeconds))
             {
                 NextStock(false);
@@ -459,9 +479,10 @@ namespace AStockTicker
 
         private void NextStock(bool force)
         {
-            if (_displayQuotes.Count == 0) return;
-            if (_displayQuotes.Count <= 2 && !force) return;
-            _startIndex = (_startIndex + 1) % _displayQuotes.Count;
+            int count = VisibleQuotes().Count;
+            if (count == 0) return;
+            if (count <= 2 && !force) return;
+            _startIndex = (_startIndex + 1) % count;
             _lastCarousel = MarketClock.Now;
             if (Visible) RenderLayered();
         }
@@ -482,9 +503,11 @@ namespace AStockTicker
         private bool ShouldShowNow()
         {
             if (_manualOverride) return _manualVisible;
-            if (!_config.HideWhenClosed) return true;
-            SessionInfo s = EffectiveSession();
-            return s != null && s.CanShow;
+            if (_config.ShowAllDay) return true;
+            DateTime now = MarketClock.Now;
+            foreach (Quote q in _displayQuotes)
+                if (MarketClock.ShowableFor(q.Code, now)) return true;
+            return false;
         }
 
         private bool ShouldFetch()
@@ -588,6 +611,7 @@ namespace AStockTicker
             }
             if (notify.Width < 80)
                 notify = new Rectangle(tray.Right - 400, tray.Top, 400, tray.Height);
+            _notifyRect = notify;
 
             return true;
         }
@@ -613,15 +637,34 @@ namespace AStockTicker
                 _startIndex = 0;
         }
 
+        /// <summary>Watch-list quotes eligible for display right now: everything when
+        /// 全时间段显示 or the manual override is on, otherwise only stocks whose market
+        /// is inside its showable window — outside it the price is static, so there is
+        /// nothing worth showing or refreshing.</summary>
+        private List<Quote> VisibleQuotes()
+        {
+            List<Quote> list = new List<Quote>();
+            if (_config.ShowAllDay || (_manualOverride && _manualVisible))
+            {
+                list.AddRange(_displayQuotes);
+                return list;
+            }
+            DateTime now = MarketClock.Now;
+            foreach (Quote q in _displayQuotes)
+                if (MarketClock.ShowableFor(q.Code, now)) list.Add(q);
+            return list;
+        }
+
         /// <summary>The one or two quotes currently on the strip, top row first.</summary>
         private List<Quote> DisplayedQuotes()
         {
             List<Quote> list = new List<Quote>();
-            if (_displayQuotes.Count == 0) return list;
-            int start = _startIndex % _displayQuotes.Count;
-            list.Add(_displayQuotes[start]);
-            if (_displayQuotes.Count > 1)
-                list.Add(_displayQuotes[(start + 1) % _displayQuotes.Count]);
+            List<Quote> visible = VisibleQuotes();
+            if (visible.Count == 0) return list;
+            int start = _startIndex % visible.Count;
+            list.Add(visible[start]);
+            if (visible.Count > 1)
+                list.Add(visible[(start + 1) % visible.Count]);
             return list;
         }
 
@@ -767,7 +810,7 @@ namespace AStockTicker
             float pctSize = priceSize * 0.85f;
             float pctGap = Math.Max(3f, height * 0.08f);
             float chartW = Math.Max(48f, Math.Min(96f, height * 1.1f));
-            bool anyTag = AnySessionTag(_displayQuotes);
+            bool anyTag = AnySessionTag(VisibleQuotes());
 
             float maxName = 0f;
             float maxPrice = 0f;
@@ -785,7 +828,7 @@ namespace AStockTicker
                     maxName = g.MeasureString("未添加自选股", nameFont, new PointF(0f, 0f), sf).Width;
                     maxPrice = g.MeasureString("--", priceFont, new PointF(0f, 0f), sf).Width;
                 }
-                foreach (Quote q in _displayQuotes)
+                foreach (Quote q in VisibleQuotes())
                 {
                     maxName = Math.Max(maxName, g.MeasureString(q.Name, nameFont, new PointF(0f, 0f), sf).Width);
                     maxPrice = Math.Max(maxPrice, g.MeasureString(q.PriceText, priceFont, new PointF(0f, 0f), sf).Width);
@@ -1058,7 +1101,7 @@ namespace AStockTicker
                 float chartX = w - pad - chartW;
                 float priceX = pad + (float)Math.Ceiling(nameColumn) + gap;
                 float pctX = priceX + (float)Math.Ceiling(priceColumn) + pctGap;
-                bool anyTag = AnySessionTag(_displayQuotes);
+                bool anyTag = AnySessionTag(quotes);
                 float tagW = anyTag ? MeasureTagWidth(g, priceSize * 0.85f) : 0f;
                 float tagX = chartX - pctGap - tagW;
 
@@ -1212,6 +1255,7 @@ namespace AStockTicker
         private void PollHover()
         {
             KeepAboveTaskbar();
+            UpdateTrayHover();
             if (!_config.PrivacyMode || !Visible || _menuOpen || !_hasPlacement) return;
             bool inside = _widgetRect.Contains(Cursor.Position);
             if (inside == _hover) return;
@@ -1322,7 +1366,7 @@ namespace AStockTicker
 
             string status = s != null ? s.Label : "休市";
             string tip = "A股行情条 · " + status;
-            bool mayShowPrice = (s != null && s.CanShow) || (_manualOverride && _manualVisible);
+            bool mayShowPrice = Visible || (_manualOverride && _manualVisible);
             if (mayShowPrice && _displayQuotes.Count > 0)
             {
                 StringBuilder parts = new StringBuilder(status);
@@ -1340,6 +1384,141 @@ namespace AStockTicker
             }
             if (tip.Length > 62) tip = tip.Substring(0, 62);
             if (_tray.Text != tip) _tray.Text = tip;
+        }
+
+        /// <summary>Shows the whole watch list as a flyout while the cursor rests on the
+        /// tray icon (~0.45s dwell), open markets first, closed ones dimmed below.</summary>
+        private void UpdateTrayHover()
+        {
+            if (_disposed || _exiting) return;
+            if (_hoverList != null && _hoverList.Disposing) return;
+            Rectangle icon = TryGetTrayIconRect();
+            bool haveAnchor = !icon.IsEmpty;
+            Point cur = Cursor.Position;
+            bool onIcon = haveAnchor && icon.Contains(cur);
+            bool onList = _hoverList != null && _hoverList.Hovering && _hoverList.Bounds.Contains(cur);
+            if (onIcon)
+            {
+                if (_trayHoverSince == DateTime.MinValue) _trayHoverSince = DateTime.Now;
+            }
+            else if (!onList)
+            {
+                _trayHoverSince = DateTime.MinValue;
+            }
+
+            bool want = onList || (onIcon && (DateTime.Now - _trayHoverSince).TotalMilliseconds >= 450);
+            if (!want)
+            {
+                if (_hoverList != null && _hoverList.Hovering) _hoverList.FadeOut();
+                return;
+            }
+
+            try
+            {
+                if (_hoverList == null || _hoverList.IsDisposed)
+                {
+                    _hoverList = new TrayHoverList();
+                    _hoverKey = "";
+                }
+                string key = BuildHoverKey();
+                if (key != _hoverKey || !_hoverList.Hovering)
+                {
+                    _hoverKey = key;
+                    PopulateHoverList();
+                }
+                _hoverList.ShowAbove(icon);
+            }
+            catch
+            {
+                // The flyout must never take the ticker down; hover stays a bonus.
+            }
+        }
+
+        private string BuildHoverKey()
+        {
+            StringBuilder sb = new StringBuilder();
+            DateTime now = MarketClock.Now;
+            foreach (Quote q in _displayQuotes)
+            {
+                sb.Append(q.Code).Append('|')
+                  .Append(MarketClock.ShowableFor(q.Code, now) ? '1' : '0').Append('|')
+                  .Append(q.Name).Append('|')
+                  .Append(q.Price <= 0.0001 ? "--" : q.PriceText).Append('|')
+                  .Append(q.Price <= 0.0001 ? "--" : q.ChangeText).Append('|')
+                  .Append(q.SessionTag).Append(';');
+            }
+            return sb.ToString();
+        }
+
+        private void PopulateHoverList()
+        {
+            if (_displayQuotes.Count == 0)
+            {
+                _hoverList.SetRows(new List<HoverRow>(), IsLightTaskbar());
+                return;
+            }
+            bool light = IsLightTaskbar();
+            DateTime now = MarketClock.Now;
+            List<HoverRow> rows = new List<HoverRow>();
+            foreach (Quote q in _displayQuotes)
+                if (MarketClock.ShowableFor(q.Code, now)) rows.Add(MakeHoverRow(q, false, light));
+            foreach (Quote q in _displayQuotes)
+                if (!MarketClock.ShowableFor(q.Code, now)) rows.Add(MakeHoverRow(q, true, light));
+            _hoverList.SetRows(rows, light);
+        }
+
+        private HoverRow MakeHoverRow(Quote q, bool dim, bool light)
+        {
+            HoverRow r = new HoverRow();
+            r.Name = q.Name;
+            r.Price = q.Price <= 0.0001 ? "--" : q.PriceText;
+            r.Pct = q.Price <= 0.0001 ? "--" : q.ChangeText;
+            r.Note = q.SessionTag;
+            r.Tag = q.Code.StartsWith("hk", StringComparison.Ordinal) ? "hk"
+                  : q.Code.StartsWith("us", StringComparison.Ordinal) ? "us" : "";
+            r.Tint = PriceColor(q, light);
+            r.Dim = dim;
+            return r;
+        }
+
+        private Rectangle TryGetTrayIconRect()
+        {
+            try
+            {
+                if (_tray == null || !_tray.Visible) return _notifyRect;
+                if (_trayHwnd == IntPtr.Zero || _trayId < 0)
+                {
+                    System.Reflection.BindingFlags flags =
+                        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+                    System.Reflection.FieldInfo wf = typeof(NotifyIcon).GetField("window", flags);
+                    System.Reflection.FieldInfo idf = typeof(NotifyIcon).GetField("id", flags);
+                    NativeWindow w = wf != null ? wf.GetValue(_tray) as NativeWindow : null;
+                    object id = idf != null ? idf.GetValue(_tray) : null;
+                    if (w != null && id is int)
+                    {
+                        _trayHwnd = w.Handle;
+                        _trayId = (int)id;
+                    }
+                }
+                if (_trayHwnd == IntPtr.Zero || _trayId < 0) return _notifyRect;
+
+                NOTIFYICONIDENTIFIER ident = new NOTIFYICONIDENTIFIER();
+                ident.cbSize = Marshal.SizeOf(typeof(NOTIFYICONIDENTIFIER));
+                ident.hWnd = _trayHwnd;
+                ident.uID = (uint)_trayId;
+                ident.guidItem = Guid.Empty;
+                RECT loc;
+                if (Shell_NotifyIconGetRect(ref ident, out loc) != 0) return _notifyRect;
+
+                Rectangle r = Rectangle.FromLTRB(loc.Left, loc.Top, loc.Right, loc.Bottom);
+                if (r.Width <= 0 || r.Width > 400) return _notifyRect;
+                if (!_notifyRect.IsEmpty && !_notifyRect.IntersectsWith(r)) return _notifyRect;
+                return r;
+            }
+            catch
+            {
+                return _notifyRect;
+            }
         }
 
         private void ToggleVisible()
@@ -1402,7 +1581,7 @@ namespace AStockTicker
             _config.RefreshSeconds = draft.RefreshSeconds;
             _config.CarouselSeconds = draft.CarouselSeconds;
             _config.FontSize = draft.FontSize;
-            _config.HideWhenClosed = draft.HideWhenClosed;
+            _config.ShowAllDay = draft.ShowAllDay;
             _config.AutoStart = draft.AutoStart;
             _config.ConfigPath = draft.ConfigPath;
 
@@ -1432,7 +1611,8 @@ namespace AStockTicker
                 "· 每行显示名称、价格、涨跌幅，行末附今日分时走势缩略图\r\n" +
                 "· 红涨绿跌，价格颜色即涨跌方向\r\n" +
                 "· 每 " + _config.CarouselSeconds + " 秒轮播下一组，悬停暂停（隐私模式下悬停不停）\r\n" +
-                "· 午休、收盘后、周末与节假日自动隐藏\r\n" +
+                "· 默认只在对应市场交易时段内显示；休市自动隐藏，可勾选「全时间段显示」\r\n" +
+                "· 悬停任务栏托盘图标可查看全部自选，交易中的排在前面\r\n" +
                 "· 右键菜单可设置、刷新、退出\r\n\r\n" +
                 "行情来源：腾讯财经 qt.gtimg.cn\r\n" +
                 "仅为看盘辅助，不构成投资建议。";
@@ -1482,6 +1662,7 @@ namespace AStockTicker
                 if (_timer != null) _timer.Dispose();
                 if (_hoverTimer != null) _hoverTimer.Dispose();
                 if (_fadeTimer != null) _fadeTimer.Dispose();
+                if (_hoverList != null) _hoverList.Dispose();
                 StopFade();
                 if (_tray != null)
                 {

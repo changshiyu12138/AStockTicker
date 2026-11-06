@@ -386,6 +386,16 @@ namespace AStockTicker
             return "";
         }
 
+        /// <summary>Whether a single stock (sh/sz/bj/hk/us code) is inside its market's
+        /// showable window right now: A/HK sessions, or US pre/regular/after hours.</summary>
+        public static bool ShowableFor(string code, DateTime now)
+        {
+            if (string.IsNullOrEmpty(code)) return false;
+            if (code.StartsWith("hk", StringComparison.Ordinal)) return GetHK(now).CanShow;
+            if (code.StartsWith("us", StringComparison.Ordinal)) return GetUS(now).CanShow;
+            return Get(now).CanShow;
+        }
+
         /// <summary>
         /// Combined session for the watched markets: visible while any included market
         /// (A-share, HKEX, or US pre/after) is in a showable window; closed only when

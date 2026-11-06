@@ -17,7 +17,7 @@ if not exist "dist" mkdir "dist"
   /win32manifest:"src\app.manifest" ^
   /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll ^
   "src\DebugLog.cs" "src\Config.cs" "src\MarketClock.cs" "src\QuoteService.cs" ^
-  "src\TrayIconFactory.cs" "src\StartupManager.cs" ^
+  "src\TrayIconFactory.cs" "src\StartupManager.cs" "src\TrayHoverList.cs" ^
   "src\SettingsForm.cs" "src\TickerForm.cs" "src\Program.cs" "src\AssemblyInfo.cs"
 
 if errorlevel 1 (

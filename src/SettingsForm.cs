@@ -20,7 +20,7 @@ namespace AStockTicker
         private NumericUpDown _refresh;
         private NumericUpDown _fontSize;
         private NumericUpDown _carousel;
-        private CheckBox _hideClosed;
+        private CheckBox _allDay;
         private CheckBox _autoStart;
         private ListBox _suggestList;
         private Timer _suggestTimer;
@@ -193,11 +193,11 @@ namespace AStockTicker
             carouselSec.Location = P(458, 31);
             group.Controls.Add(carouselSec);
 
-            _hideClosed = new CheckBox();
-            _hideClosed.Text = "休市 / 午休时隐藏";
-            _hideClosed.AutoSize = true;
-            _hideClosed.Location = P(16, 70);
-            group.Controls.Add(_hideClosed);
+            _allDay = new CheckBox();
+            _allDay.Text = "全时间段显示（休市也显示行情）";
+            _allDay.AutoSize = true;
+            _allDay.Location = P(16, 70);
+            group.Controls.Add(_allDay);
 
             _autoStart = new CheckBox();
             _autoStart.Text = "开机自动启动";
@@ -206,7 +206,7 @@ namespace AStockTicker
             group.Controls.Add(_autoStart);
 
             Label groupHint = new Label();
-            groupHint.Text = "字号 8–14 可调，两行自动适配任务栏高度；盘中约每 3 秒刷新。";
+            groupHint.Text = "默认只在对应市场交易时段内显示；悬停任务栏托盘图标可查看全部自选。";
             groupHint.ForeColor = Color.FromArgb(120, 130, 145);
             groupHint.AutoSize = true;
             groupHint.Location = P(16, 105);
@@ -267,7 +267,7 @@ namespace AStockTicker
             _refresh.Value = _draft.RefreshSeconds;
             _fontSize.Value = _draft.FontSize;
             _carousel.Value = _draft.CarouselSeconds;
-            _hideClosed.Checked = _draft.HideWhenClosed;
+            _allDay.Checked = _draft.ShowAllDay;
             _autoStart.Checked = _draft.AutoStart;
         }
 
@@ -587,7 +587,7 @@ namespace AStockTicker
             _draft.RefreshSeconds = (int)_refresh.Value;
             _draft.CarouselSeconds = (int)_carousel.Value;
             _draft.FontSize = (int)_fontSize.Value;
-            _draft.HideWhenClosed = _hideClosed.Checked;
+            _draft.ShowAllDay = _allDay.Checked;
             _draft.AutoStart = _autoStart.Checked;
 
             bool autoOk = StartupManager.Set(_draft.AutoStart);
