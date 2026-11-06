@@ -145,7 +145,6 @@ namespace AStockTicker
         private SessionInfo _session;
         private QuoteBatch _lastBatch;
         private readonly List<Quote> _displayQuotes = new List<Quote>();
-        private string _lastError;
         private bool _fetching;
         private DateTime _nextFetch = DateTime.MinValue;
         private bool _manualOverride;
@@ -217,10 +216,15 @@ namespace AStockTicker
             BuildMenu();
             _tray = new NotifyIcon();
             _tray.Icon = TrayIconFactory.Get(_session.Kind);
-            _tray.Text = "A股行情条";
             _tray.ContextMenuStrip = _menu;
             _tray.Visible = true;
             _tray.DoubleClick += delegate { ToggleVisible(); };
+            _tray.MouseDown += delegate(object sender, MouseEventArgs e)
+            {
+                if (e.Button != MouseButtons.Right) return;
+                _trayHoverSince = DateTime.MinValue;
+                if (_hoverList != null && !_hoverList.IsDisposed) _hoverList.FadeOut();
+            };
 
             ContextMenuStrip = _menu;
 
@@ -1321,16 +1325,10 @@ namespace AStockTicker
             _fetching = false;
             if (batch == null) return;
 
-            if (batch.Error != null && batch.Quotes.Count == 0)
-            {
-                _lastError = batch.Error;
-            }
-            else
-            {
-                _lastError = null;
-                _lastBatch = batch;
-                DetectHoliday(batch);
-            }
+            if (batch.Error != null && batch.Quotes.Count == 0) return;
+
+            _lastBatch = batch;
+            DetectHoliday(batch);
 
             BuildDisplayQuotes();
             UpdateTray();
@@ -1363,27 +1361,7 @@ namespace AStockTicker
                 _tray.Icon = TrayIconFactory.Get(kind);
                 _trayKind = kind;
             }
-
-            string status = s != null ? s.Label : "休市";
-            string tip = "A股行情条 · " + status;
-            bool mayShowPrice = Visible || (_manualOverride && _manualVisible);
-            if (mayShowPrice && _displayQuotes.Count > 0)
-            {
-                StringBuilder parts = new StringBuilder(status);
-                foreach (Quote q in DisplayedQuotes())
-                {
-                    if (q == null || q.Price <= 0) continue;
-                    parts.Append(" · ").Append(q.Name).Append(' ')
-                         .Append(q.PriceText).Append(' ').Append(q.ChangeText);
-                }
-                if (parts.Length > status.Length) tip = parts.ToString();
-            }
-            else if (!string.IsNullOrEmpty(_lastError))
-            {
-                tip = status + " · 网络异常";
-            }
-            if (tip.Length > 62) tip = tip.Substring(0, 62);
-            if (_tray.Text != tip) _tray.Text = tip;
+            // The shell tooltip stays empty on purpose: the hover flyout replaces it.
         }
 
         /// <summary>Shows the whole watch list as a flyout while the cursor rests on the
@@ -1392,6 +1370,13 @@ namespace AStockTicker
         {
             if (_disposed || _exiting) return;
             if (_hoverList != null && _hoverList.Disposing) return;
+            if (_menuOpen)
+            {
+                // The tray context menu draws here; keep the flyout out of its way.
+                _trayHoverSince = DateTime.MinValue;
+                if (_hoverList != null && !_hoverList.IsDisposed) _hoverList.FadeOut();
+                return;
+            }
             Rectangle icon = TryGetTrayIconRect();
             bool haveAnchor = !icon.IsEmpty;
             Point cur = Cursor.Position;
